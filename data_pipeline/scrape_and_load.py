@@ -172,6 +172,195 @@ def clean(raw_rows):
     df["price_inr"] = df["price_inr"].astype(float)
     df["rating"] = df["rating"].astype(int)
     df["in_stock"] = df["in_stock"].astype(bool)
+# ─────────────────────────────────────────────
+# STEP 3: LOAD INTO SQLITE
+# ─────────────────────────────────────────────
 
+def create_schema(conn):
+    """Create normalized two-table schema."""
+    conn.executescript("""
+        DROP TABLE IF EXISTS books;
+        DROP TABLE IF EXISTS categories;
+
+        CREATE TABLE categories (
+            category_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_name TEXT    NOT NULL UNIQUE
+        );
+
+        CREATE TABLE books (
+            book_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            title        TEXT    NOT NULL,
+            price_gbp    REAL    NOT NULL,
+            price_inr    REAL    NOT NULL,
+            rating       INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+            in_stock     INTEGER NOT NULL,   -- 0/1 boolean
+            category_id  INTEGER NOT NULL REFERENCES categories(category_id)
+        );
+    """)
+    conn.commit()
+
+
+def insert_data(conn, df):
+    """Insert categories then books, maintaining FK relationship."""
+    # Insert unique categories
+    categories = df["category"].unique()
+    for cat in categories:
+        conn.execute(
+            "INSERT OR IGNORE INTO categories (category_name) VALUES (?)", (cat,)
+        )
+    conn.commit()
+
+    # Build category_name → id map
+    cat_map = {row[1]: row[0] for row in conn.execute(
+        "SELECT category_id, category_name FROM categories"
+    )}
+
+    # Insert books
+    for _, row in df.iterrows():
+        conn.execute(
+            """INSERT INTO books
+               (title, price_gbp, price_inr, rating, in_stock, category_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                row["title"],
+                float(row["price_gbp"]),
+                float(row["price_inr"]),
+                int(row["rating"]),
+                int(row["in_stock"]),
+                cat_map[row["category"]]
+            )
+        )
+    conn.commit()
+    total = conn.execute("SELECT COUNT(*) FROM books").fetchone()[0]
+    print(f"  Inserted {total} books into SQLite.")
     print(f"  Clean DataFrame shape: {df.shape}")
     return df
+    # ─────────────────────────────────────────────
+# STEP 4: SQL QUERIES (≥ 5, covering all required clauses + JOIN)
+# ─────────────────────────────────────────────
+
+def run_queries(conn):
+    """Run all required SQL queries, print output, and return DataFrames."""
+    queries = {}
+
+    # Q1 — SELECT / WHERE / ORDER BY / LIMIT
+    queries["Q1_cheapest_in_stock"] = """
+        SELECT title, price_gbp, price_inr, rating
+        FROM   books
+        WHERE  in_stock = 1
+        ORDER  BY price_gbp ASC
+        LIMIT  10;
+    """
+
+    # Q2 — DISTINCT
+    queries["Q2_distinct_categories"] = """
+        SELECT DISTINCT category_name
+        FROM   categories
+        ORDER  BY category_name;
+    """
+
+    # Q3 — BETWEEN
+    queries["Q3_mid_range_price"] = """
+        SELECT title, price_gbp, rating
+        FROM   books
+        WHERE  price_gbp BETWEEN 10.00 AND 30.00
+        ORDER  BY price_gbp DESC;
+    """
+
+    # Q4 — IN
+    queries["Q4_high_rated"] = """
+        SELECT title, rating, price_gbp
+        FROM   books
+        WHERE  rating IN (4, 5)
+        ORDER  BY rating DESC, price_gbp ASC
+        LIMIT  15;
+    """
+
+    # Q5 — JOIN (top 10 highest-rated books per category)
+    queries["Q5_join_top_rated_per_category"] = """
+        SELECT c.category_name,
+               b.title,
+               b.rating,
+               b.price_gbp,
+               b.price_inr
+        FROM   books b
+        JOIN   categories c ON b.category_id = c.category_id
+        ORDER  BY c.category_name, b.rating DESC, b.price_gbp ASC
+        LIMIT  30;
+    """
+
+    # Q6 — Aggregate + JOIN (average price per category)
+    queries["Q6_avg_price_per_category"] = """
+        SELECT c.category_name,
+               COUNT(b.book_id)       AS total_books,
+               ROUND(AVG(b.price_gbp), 2) AS avg_price_gbp,
+               ROUND(AVG(b.price_inr), 2) AS avg_price_inr
+        FROM   books b
+        JOIN   categories c ON b.category_id = c.category_id
+        GROUP  BY c.category_name
+        ORDER  BY avg_price_gbp DESC;
+    """
+
+    results = {}
+    for name, sql in queries.items():
+        print(f"\n{'─'*60}")
+        print(f"  {name}")
+        print(f"  SQL: {sql.strip()}")
+        df = pd.read_sql(sql, conn)
+        print(df.to_string(index=False))
+        results[name] = df
+
+    return results
+
+# ─────────────────────────────────────────────
+# STEP 5: pandas pd.read_sql AND pd.merge
+# ─────────────────────────────────────────────
+
+def pandas_operations(conn, df_books):
+    """
+    Demonstrate pd.read_sql and pd.merge equivalence for the JOIN query.
+    df_books: the full cleaned books DataFrame (in-memory, with 'category' column).
+    """
+    print("\n" + "="*60)
+    print("  PANDAS OPERATIONS — pd.read_sql vs pd.merge")
+    print("="*60)
+
+    # ── via pd.read_sql ──
+    sql_join = """
+        SELECT c.category_name,
+               b.title,
+               b.rating,
+               b.price_gbp,
+               b.price_inr
+        FROM   books b
+        JOIN   categories c ON b.category_id = c.category_id
+        ORDER  BY c.category_name, b.rating DESC
+        LIMIT  20;
+    """
+    df_sql = pd.read_sql(sql_join, conn)
+    print("\n  [pd.read_sql result — first 10 rows]")
+    print(df_sql.head(10).to_string(index=False))
+
+    # ── via pd.merge (in-memory) ──
+    # Load categories table into a DataFrame
+    df_cats = pd.read_sql("SELECT category_id, category_name FROM categories", conn)
+    df_books_db = pd.read_sql("SELECT * FROM books", conn)
+
+    df_merged = (
+        df_books_db
+        .merge(df_cats, on="category_id")
+        [["category_name", "title", "rating", "price_gbp", "price_inr"]]
+        .sort_values(["category_name", "rating"], ascending=[True, False])
+        .head(20)
+        .reset_index(drop=True)
+    )
+    print("\n  [pd.merge result — first 10 rows]")
+    print(df_merged.head(10).to_string(index=False))
+
+    # Verify equivalence
+    # Reset index and align columns for comparison
+    df_sql_cmp = df_sql.reset_index(drop=True)
+    df_merge_cmp = df_merged.reset_index(drop=True)
+    match = df_sql_cmp.equals(df_merge_cmp)
+    print(f"\n  pd.read_sql == pd.merge: {match}")
+    return df_sql, df_merged
