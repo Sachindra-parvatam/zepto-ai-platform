@@ -172,6 +172,8 @@ def clean(raw_rows):
     df["price_inr"] = df["price_inr"].astype(float)
     df["rating"] = df["rating"].astype(int)
     df["in_stock"] = df["in_stock"].astype(bool)
+    
+    return df
 # ─────────────────────────────────────────────
 # STEP 3: LOAD INTO SQLITE
 # ─────────────────────────────────────────────
