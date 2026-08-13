@@ -364,3 +364,44 @@ def pandas_operations(conn, df_books):
     match = df_sql_cmp.equals(df_merge_cmp)
     print(f"\n  pd.read_sql == pd.merge: {match}")
     return df_sql, df_merged
+
+
+# ─────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────
+
+def main():
+    print("=" * 60)
+    print("  ZEPTO DATA PIPELINE — Module 1")
+    print("=" * 60)
+
+    # 1. Scrape
+    print("\n[1] Scraping books.toscrape.com …")
+    raw_rows = scrape_all(min_books=60, min_categories=3)
+
+    # 2. Clean
+    print("\n[2] Cleaning data …")
+    df = clean(raw_rows)
+    print(df.dtypes)
+    print(df.head(3))
+
+    # 3. Load into SQLite
+    print(f"\n[3] Loading into SQLite at {DB_PATH} …")
+    conn = sqlite3.connect(DB_PATH)
+    create_schema(conn)
+    insert_data(conn, df)
+
+    # 4. SQL queries
+    print("\n[4] Running SQL queries …")
+    query_results = run_queries(conn)
+
+    # 5. pandas operations
+    print("\n[5] pandas pd.read_sql and pd.merge …")
+    pandas_operations(conn, df)
+
+    conn.close()
+    print("\n[✓] Pipeline complete. Database saved to:", DB_PATH)
+
+
+if __name__ == "__main__":
+    main()
