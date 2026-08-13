@@ -107,3 +107,71 @@ def scrape_all(min_books=60, min_categories=3):
             break
     print(f"  Scraped {len(all_rows)} books across {len(categories_scraped)} categories.")
     return all_rows
+    # ─────────────────────────────────────────────
+# STEP 2: CLEAN
+# ─────────────────────────────────────────────
+
+def parse_price(raw):
+    """Strip currency symbols and convert to float."""
+    cleaned = re.sub(r"[^\d.]", "", raw)
+    return float(cleaned) if cleaned else None
+
+
+def parse_rating(star_word):
+    """Convert word rating to integer 1–5."""
+    return RATING_MAP.get(star_word.lower(), None)
+
+
+def parse_availability(avail_text):
+    """Return True if 'In stock', False otherwise."""
+    return "in stock" in avail_text.lower()
+
+
+def clean(raw_rows):
+    """Convert raw scraped rows into a clean DataFrame."""
+    records = []
+    dropped = 0
+    for row in raw_rows:
+        price_gbp = parse_price(row["price_raw"])
+        rating = parse_rating(row["star_word"])
+        in_stock = parse_availability(row["availability_raw"])
+
+        # Median imputation for price_gbp — collect valids first; apply after
+        # For rating, if parse fails (None), we will impute below
+        records.append({
+            "title": row["title"],
+            "price_gbp": price_gbp,
+            "rating": rating,
+            "in_stock": in_stock,
+            "category": row["category"]
+        })
+
+    df = pd.DataFrame(records)
+
+    # Median imputation for numeric fields
+    price_median = df["price_gbp"].median()
+    rating_median = int(df["rating"].median()) if df["rating"].notna().any() else 3
+
+    before = len(df)
+    # Only drop rows where title or category is missing — these are unrecoverable
+    df = df.dropna(subset=["title", "category"])
+    dropped = before - len(df)
+    if dropped:
+        print(f"  Dropped {dropped} rows with missing title/category.")
+
+    # Impute numeric fields
+    df["price_gbp"] = df["price_gbp"].fillna(price_median)
+    df["rating"] = df["rating"].fillna(rating_median).astype(int)
+    df["in_stock"] = df["in_stock"].fillna(False)
+
+    # ── Currency conversion (fixed-rate baseline) ──
+    df["price_inr"] = (df["price_gbp"] * GBP_TO_INR).round(2)
+
+    # Ensure correct dtypes
+    df["price_gbp"] = df["price_gbp"].astype(float)
+    df["price_inr"] = df["price_inr"].astype(float)
+    df["rating"] = df["rating"].astype(int)
+    df["in_stock"] = df["in_stock"].astype(bool)
+
+    print(f"  Clean DataFrame shape: {df.shape}")
+    return df
