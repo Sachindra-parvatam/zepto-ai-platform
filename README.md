@@ -4,11 +4,11 @@ A three-module end-to-end AI/ML platform built for Zepto's analytics guild.
 
 ```
 zepto-ai-platform/
-├── data_pipeline/          # Module 1 — Data Pipeline (25 marks)
-├── analytics/              # Module 2 — Analytics Pipeline (50 marks)
-├── support_assistant/      # Module 3 — Support Assistant (25 marks)
+├── data_pipeline/          # Module 1 — Data Pipeline
+├── analytics/              # Module 2 — Analytics Pipeline
+├── support_assistant/      # Module 3 — Support Assistant
 ├── requirements.txt        # Consolidated requirements for all modules
-└── README.md               # This file
+└── README.md           
 ```
 
 ---

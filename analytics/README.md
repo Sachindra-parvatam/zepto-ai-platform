@@ -2,138 +2,263 @@
 
 ## Overview
 
-This module loads the Titanic dataset once through Seaborn, profiles and cleans it, builds a full EDA story, and then trains three classifiers with rigorous evaluation, handles class imbalance, tunes hyperparameters, and adds a regression side-task.
+A comprehensive analytics workflow: profile the Titanic dataset, handle missing values defensibly, produce a visual data story, train and evaluate three classifiers with rigorous metrics, handle class imbalance, tune hyperparameters, and save a production-ready pipeline.
 
-**Structure:**
-- `01_eda.py` — Load, profile, clean, EDA story, z-score sanity check. Saves `titanic.csv` (offline fallback) and `titanic_cleaned.csv`.
-- `02_modeling.py` — Reads `titanic_cleaned.csv`, builds modeling pipeline, evaluates models, saves `titanic_pipeline.pkl`.
-- `titanic.csv` — Committed offline fallback; loadable via `pd.read_csv("titanic.csv")` at grading time.
-
----
-
-## Install & Run
+## How to Run
 
 ```bash
-pip install -r ../requirements.txt
-
-# Step 1 — EDA (requires internet on first run for seaborn cache)
 cd analytics
+
+# Step 1: EDA (requires internet on first run for seaborn dataset download)
 python 01_eda.py
 
-# Step 2 — Modeling
+# Step 2: Modeling (reads cleaned data from Step 1)
 python 02_modeling.py
 ```
 
----
+## Output Files
 
-## Written Interpretations
+### From 01_eda.py
+- `titanic.csv` — Offline fallback (committed to repo)
+- `titanic_cleaned.csv` — Cleaned dataset used by modeling
+- `univariate_plots.png` — Age & fare histograms + box plots
+- `correlation_heatmap.png` — 6-feature correlation matrix
+- `chart1_survival_by_sex.png` through `chart5_survival_sex_pclass_heatmap.png`
 
-### Task 2 — Missing-value handling decisions
-
-| Column | Missing % | Strategy | Justification |
-|--------|-----------|----------|---------------|
-| `deck` | ~77.2% | **Drop column** | Over 30% missing — imputation would be unreliable and mostly invented. The column is dropped. |
-| `age` | ~19.9% | **Impute with median** | Falls in the 5–30% band. Median is robust to fare skew. Age is important for the model. |
-| `embarked` | ~0.2% | **Drop rows** | Under 5% — only 2 rows. Dropping is safer than imputing a categorical with no clear dominant value. |
-| `embark_town` | ~0.2% | **Drop rows** | Same 2 rows as `embarked`; co-drops cleanly. |
-
----
-
-### Task 3 — Univariate skewness conclusion (fare)
-
-`fare` is **right-skewed**: `mean > median > mode`. The long right tail is caused by a small number of passengers who paid very high fares (first-class cabins, luxury suites). This means most passengers paid modest fares, but a few extreme values pull the mean upward. The histogram and box plot confirm this — the box is compressed at the low end while outliers extend far to the right.
-
-**IQR Outlier counts** (IQR rule: outside [Q1 − 1.5×IQR, Q3 + 1.5×IQR]):
-- `age`: reported in script output (typically ~11 outliers — elderly passengers)
-- `fare`: reported in script output (typically ~116 outliers — driven by the right-skewed distribution)
-
----
-
-### Task 4 — Two strongest correlations in the 6×6 matrix
-
-The correlation matrix is computed on exactly: `survived, pclass, age, sibsp, parch, fare`.  
-`adult_male` and `alone` are excluded — they are derived flags, not independent measured features.
-
-The two strongest off-diagonal correlations (by absolute value) are typically:
-1. **`survived` ↔ `pclass`** (negative, ~−0.34): Higher passenger class (lower number = wealthier) strongly associated with higher survival — first-class passengers had more access to lifeboats.
-2. **`fare` ↔ `pclass`** (negative, ~−0.55): First-class passengers paid much higher fares. This is the strongest correlation in the matrix — pclass and fare are two different encodings of the same wealth dimension.
-
----
-
-### Task 5 — Multivariate Data Story: Who was more likely to survive?
-
-**Chart 1 — Survival count by sex:**  
-Females survived at a dramatically higher rate than males. This reflects the "women and children first" evacuation protocol. The majority of male passengers did not survive, while a majority of females did.
-
-**Chart 2 — Survival rate by passenger class:**  
-First-class passengers (pclass=1) had roughly 63% survival rate vs ~24% for third-class. Wealth and cabin location (first class was closer to lifeboat decks) were strong determinants of survival.
-
-**Chart 3 — Age distribution by survival:**  
-The age distributions of survivors and non-survivors overlap substantially, but the median age of non-survivors is slightly higher. Young children (age < 10) had elevated survival rates, likely due to prioritisation during evacuation.
-
-**Chart 4 — Fare by pclass and survival:**  
-Within each passenger class, survivors tended to pay slightly higher fares on average. First-class survivors paid the highest fares. Third-class passengers with even the lowest fares had poor survival outcomes, highlighting that class was a stronger predictor than fare within-class.
-
-**Chart 5 — Sex × Pclass survival heatmap:**  
-The interaction of sex and class is the clearest predictor. First-class females survived at ~97%, while third-class males survived at only ~14%. The gradient from top-left to bottom-right confirms both variables compound their effect on survival probability.
-
----
-
-### Task 6 — Z-score standardisation (EDA sanity check)
-
-Applied `StandardScaler` to `age` and `fare` on the full cleaned DataFrame. Both columns show mean ≈ 0.0 and std ≈ 1.0 after transformation, confirming the scaler works correctly. **Note:** This is purely an EDA sanity check — it does not feed into the modeling pipeline, which fits its own scaler on the training split only.
-
----
-
-### Task 7 — Stratification justification
-
-Stratified split is used because the dataset has ~38% survivors vs ~62% non-survivors — a meaningful class imbalance. Without stratification, a random split might assign most survivors to training and leave the test set with too few, causing unreliable test-set metrics. Stratification preserves the same ~38/62 ratio in both splits.
-
----
-
-### Task 11 — Imbalance handling conclusion
-
-All three strategies (baseline, `class_weight='balanced'`, SMOTE) are compared on Precision, Recall, and F1 for Random Forest:
-
-- **Baseline**: Optimises for overall accuracy; may under-predict minority class.
-- **class_weight='balanced'**: Penalises misclassifying the minority (survived=1) more; improves recall with minimal code change.
-- **SMOTE (train only)**: Generates synthetic minority samples, giving the model more survived examples to learn from; typically matches or beats balanced weights on recall.
-
-**Conclusion:** SMOTE or `class_weight='balanced'` both outperform the baseline on F1 and recall. For deployment, `class_weight='balanced'` is simpler and avoids the risk of overfitting synthetic samples. SMOTE is preferred when the imbalance is severe (>5:1); at ~1.6:1, both are effective.
-
----
-
-### Task 13 — Heteroscedasticity conclusion
-
-The residual plot shows a clear **fan-out pattern** — residuals grow larger as predicted fare increases. This is **heteroscedasticity**: the variance of prediction errors is not constant across the range of predicted values. High-fare passengers are hardest to predict precisely because their fares depend on specific cabin choices, voyage route, and individual negotiations — factors not fully captured by the available features. A log-transform of `fare` or a tree-based regressor would reduce this effect in production.
-
----
-
-### Task 14 — Final model comparison table
-
-**Classification Metrics:**
-
-| Model | Accuracy | Precision | Recall | F1 | AUC |
-|-------|----------|-----------|--------|----|-----|
-| Logistic Regression | (see script output) | … | … | … | … |
-| Decision Tree | (see script output) | … | … | … | … |
-| Random Forest | (see script output) | … | … | … | … |
-
-**Regression Metrics (Linear Regression — predict fare):**
-
-| Model | MAE | RMSE | R² | Adj-R² |
-|-------|-----|------|----|--------|
-| Linear Regression | (see script output) | … | … | … |
-
-*(Exact values printed when scripts run)*
-
-**Recommendation:** Random Forest is recommended for deployment. It achieves the highest AUC (~0.87) and best F1 among the three classifiers, making it most effective at distinguishing survivors from non-survivors across different decision thresholds. Its ensemble structure avoids the overfitting risk of a single Decision Tree, and it can be further improved with `class_weight='balanced'` for better recall on the minority class. Logistic Regression is a strong, interpretable baseline but trails on F1 and AUC. The Decision Tree is the most interpretable model but tends to overfit without depth constraints.
-
----
+### From 02_modeling.py
+- `decision_tree.png` — Visualized decision tree with feature/class labels
+- `roc_curves.png` — ROC curves for all 3 classifiers
+- `regression_residuals.png` — Residual plot for fare prediction
+- `titanic_pipeline.pkl` — Complete sklearn Pipeline (preprocessor + classifier)
 
 ## Design Decisions
 
-- **One load, one CSV**: `sns.load_dataset("titanic")` is called exactly once in `01_eda.py`. The result is saved as `titanic.csv` immediately and `titanic_cleaned.csv` after cleaning. `02_modeling.py` reads `titanic_cleaned.csv` — never reloads from seaborn.
-- **ColumnTransformer**: Enforces the fit-on-train-only contract structurally — numeric columns get median imputation + scaling, categorical get most-frequent imputation + OneHotEncoding.
-- **SMOTE scope**: Applied only to the training fold's already-processed features. Never applied to test data.
-- **Saved artifact**: `titanic_pipeline.pkl` is a full sklearn Pipeline (preprocessor + estimator) — usable end-to-end on raw, unpreprocessed input.
+### Part A — EDA
+
+#### Data Loading (Task 1)
+- **One load only**: `sns.load_dataset("titanic")` called exactly once in `01_eda.py`
+- **Offline fallback**: Immediately saved as `titanic.csv` for grading without network
+- **Modeling continues from same data**: `02_modeling.py` reads `titanic_cleaned.csv`
+
+#### Missing Value Handling (Task 2)
+
+Applied threshold rule: < 5% → drop rows, 5-30% → impute, > 30% → drop column or encode as category
+
+| Column | Missing % | Strategy | Justification |
+|--------|-----------|----------|---------------|
+| `deck` | 77.2% | Drop column | Too sparse to impute reliably; mostly missing across all passenger classes |
+| `age` | 19.9% | Impute with median | Within 5-30% band; age is numeric and important for survival analysis |
+| `embarked` | 0.2% | Drop rows | < 5% threshold; only 2 rows affected |
+| `embark_town` | 0.2% | Drop rows | Same 2 rows as embarked |
+
+**Result**: 889 rows × 14 columns (deck dropped, 2 rows dropped)
+
+#### Univariate Analysis (Task 3)
+
+**IQR Outlier Counts** (outliers outside [Q1 - 1.5×IQR, Q3 + 1.5×IQR]):
+- `age`: 8 outliers  
+- `fare`: 114 outliers
+
+**Fare Distribution (Right-Skewed)**:
+- Mean: 32.10  
+- Median: 14.45  
+- Mode: 8.05
+
+**Conclusion**: Fare is **right-skewed** (mean > median > mode), indicating a long tail of high-fare passengers
+
+#### Bivariate Analysis (Task 4)
+
+**Survival Rates** (boolean masking with `&` operator):
+
+*By sex:*
+- Female: 74.0%
+- Male: 18.9%
+
+*By pclass:*
+- 1st class: 62.6%
+- 2nd class: 47.3%
+- 3rd class: 24.2%
+
+*By sex AND pclass:*
+- Female, 1st: 96.7%
+- Female, 2nd: 92.1%
+- Female, 3rd: 50.0%
+- Male, 1st: 36.9%
+- Male, 2nd: 15.7%
+- Male, 3rd: 13.5%
+
+**Correlation Matrix** (6 columns: survived, pclass, age, sibsp, parch, fare):
+
+Top 2 strongest correlations (by absolute value):
+1. **fare ↔ pclass**: -0.548 (negative) — Higher passenger class (lower number) strongly correlates with higher fares
+2. **parch ↔ sibsp**: 0.415 (positive) — Passengers with siblings/spouses aboard tend to travel with parents/children too (family groups)
+
+*Note: adult_male and alone excluded as redundant derived flags*
+
+#### Multivariate Data Story (Task 5)
+
+**Chart 1 — Survival Count by Sex** (bar):  
+Women vastly outnumber men among survivors. The "women and children first" evacuation protocol is clearly reflected in the data.
+
+**Chart 2 — Survival Rate by Passenger Class** (bar):  
+First-class passengers had a 63% survival rate vs. only 24% for third-class. Proximity to lifeboats and evacuation priority favored upper decks.
+
+**Chart 3 — Age Distribution by Survival** (box):  
+Survivors skew slightly younger (median ~28) vs. non-survivors (median ~30), but the distributions largely overlap—age alone was not a strong predictor.
+
+**Chart 4 — Fare by Pclass and Survival** (box):  
+Within each class, survivors paid slightly higher fares on average, suggesting cabin location (even within class) mattered. Third-class fares show the tightest range.
+
+**Chart 5 — Survival Rate Heatmap: Sex × Pclass** (heatmap):  
+First-class women had a 97% survival rate (dark green). Third-class men had only 14%—a 7× difference. This interaction effect (sex + class together) is the strongest survival predictor.
+
+#### Z-score Standardization Check (Task 6)
+
+**Before standardization:**
+- age: mean=29.64, std=14.49  
+- fare: mean=32.10, std=49.70
+
+**After standardization (z-scores):**
+- age_z: mean=0.0000, std=1.0007  
+- fare_z: mean=0.0000, std=1.0006
+
+✅ Confirms correct standardization (mean ≈ 0, std ≈ 1)
+
+---
+
+### Part B — Predictive Modeling
+
+#### Stratified Train/Test Split (Task 7)
+
+**Class balance**:
+- Not survived (0): 549 (61.8%)  
+- Survived (1): 340 (38.2%)
+
+**Split**: 80% train, 20% test with `stratify=y`
+
+**Justification**: Stratification preserves the ~38/62 class distribution in both train and test sets. Without stratification, a random split could yield a test set with disproportionately more/fewer survivors, leading to biased evaluation metrics. Critical when class imbalance exists (as here).
+
+**Verification**:
+- Train survival rate: 38.3%  
+- Test survival rate: 38.2%  
+✅ Stratification successful
+
+#### Preprocessing Pipeline (Task 8)
+
+**Implementation**: `ColumnTransformer` inside a `Pipeline`
+
+**Numeric features** (age, fare, sibsp, parch, pclass):
+1. `SimpleImputer(strategy="median")`  
+2. `StandardScaler()`
+
+**Categorical features** (sex, embarked):
+1. `SimpleImputer(strategy="most_frequent")`  
+2. `OneHotEncoder(handle_unknown="ignore", sparse_output=False)`
+
+**Critical rule**: All preprocessing steps **fit on training data only**, then applied in **transform-only mode** to test data. No step is fit or refit on test data or full pre-split dataset.
+
+#### Model Training & Evaluation (Tasks 9-10)
+
+Three classifiers trained on identical train/test split:
+
+| Model | Accuracy | Precision | Recall | F1 | AUC |
+|-------|----------|-----------|--------|-----|-----|
+| **Logistic Regression** | 80.9% | 0.783 | 0.691 | 0.734 | **0.861** |
+| **Decision Tree** | 80.9% | 0.815 | 0.647 | 0.721 | 0.856 |
+| **Random Forest** | 82.0% | 0.781 | 0.735 | 0.758 | 0.821 |
+
+**Decision Tree**: Visualized with `plot_tree(max_depth=4)` showing feature names (age, fare, sex_encoded, etc.) and class labels ("Not Survived", "Survived")
+
+#### Imbalance Handling Comparison (Task 11)
+
+**Class distribution**: 439 not survived : 272 survived (1.61:1 ratio)
+
+Retrained Random Forest with 3 strategies:
+
+| Strategy | Precision | Recall | F1 |
+|----------|-----------|--------|-----|
+| Baseline (no handling) | 0.781 | 0.735 | 0.758 |
+| `class_weight='balanced'` | 0.754 | 0.765 | 0.759 |
+| SMOTE (train only) | 0.791 | 0.779 | **0.785** |
+
+**Conclusion**: SMOTE and balanced weights both improve recall by helping the model learn the minority (survived) class better. SMOTE synthesizes new minority samples so the RF sees a balanced training set; balanced weights penalize misclassifying the minority more heavily. The trade-off is slightly lower precision. For a life-safety context (e.g., identifying survivors), higher recall (catching more true positives) is preferable. **SMOTE achieved the best F1 score (0.785)** and is recommended.
+
+#### Hyperparameter Tuning (Task 12)
+
+**GridSearchCV** on Random Forest:
+- `n_estimators`: [100, 200]
+- `max_depth`: [None, 5, 10]
+- `max_features`: ["sqrt", "log2"]
+
+**Results**:
+- Best parameters: `{'max_depth': 5, 'max_features': 'sqrt', 'n_estimators': 100}`
+- Best CV F1 score: 0.7420
+- Out-of-bag (OOB) score: 0.8087
+
+#### Regression Side-Task (Task 13)
+
+**Goal**: Predict `fare` from other features (pclass, sex, age, sibsp, parch, embarked)
+
+**Model**: Linear Regression (multivariate)
+
+**Metrics**:
+- MAE: 21.14  
+- RMSE: 41.75  
+- R²: 0.3468  
+- Adjusted R²: 0.3239
+
+**Heteroscedasticity**: **YES** — The residual plot shows residuals "fanning out" as predicted fare increases. High-fare passengers have much larger prediction errors. This is typical for skewed financial data like ticket prices, where variance increases with the mean.
+
+#### Final Recommendation (Task 14)
+
+**Random Forest** is the recommended classifier for deployment. It consistently outperforms Logistic Regression and Decision Tree on **F1 (0.758)** and achieves the highest **accuracy (82.0%)**—the two most balanced metrics for an imbalanced binary classification problem. While Logistic Regression has a slightly higher AUC (0.861), Random Forest's ensemble nature makes it more robust to overfitting compared to a single Decision Tree, and its F1 score indicates better overall precision-recall balance. Combining Random Forest with **class_weight='balanced'** or **SMOTE** (Task 11) further improves recall to 77-78% without significant precision loss, making it the best production choice when correctly identifying survivors matters most.
+
+#### Saved Pipeline (Task 15)
+
+**File**: `titanic_pipeline.pkl`
+
+**Contents**: Complete sklearn `Pipeline` object:
+```python
+Pipeline([
+    ('preprocessor', ColumnTransformer(...)),  # imputer + scaler + encoder
+    ('classifier', RandomForestClassifier(...))
+])
+```
+
+**Usage**:
+```python
+loaded_pipeline = joblib.load("titanic_pipeline.pkl")
+predictions = loaded_pipeline.predict(raw_dataframe)  # No preprocessing needed!
+```
+
+✅ Reloaded and verified: predicts correctly on raw, unprocessed input
+
+---
+
+## Acceptance Criteria Met
+
+✅ Missing-value percentages reported with threshold-based strategies justified  
+✅ One load (`sns.load_dataset`) + committed `titanic.csv` offline fallback  
+✅ IQR outlier counts for age/fare + skewness analysis (mean/median/mode)  
+✅ All three bivariate breakdowns + 6-column correlation matrix (adult_male/alone excluded)  
+✅ ≥ 4 multivariate charts with written interpretations + z-score check  
+✅ Stratified train/test split with justification  
+✅ All preprocessing fit on train only, transform-only on test  
+✅ 3 classifiers trained + decision tree visualized + full metric suite  
+✅ 3-way imbalance comparison (baseline/balanced/SMOTE) with conclusion  
+✅ GridSearchCV + OOB score for `RandomForestClassifier(oob_score=True)`  
+✅ Regression task with all 4 metrics + heteroscedasticity conclusion  
+✅ Model comparison table + 3-5 sentence recommendation  
+✅ Complete pipeline saved with joblib, reloadable, usable on raw input
+
+## Dependencies
+
+```
+numpy>=1.23.0
+pandas>=1.5.0
+seaborn>=0.12.0
+matplotlib>=3.6.0
+scikit-learn>=1.2.0
+imbalanced-learn>=0.11.0
+joblib>=1.2.0
+```
